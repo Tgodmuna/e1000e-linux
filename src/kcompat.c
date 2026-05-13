@@ -595,18 +595,6 @@ found_middle:
 	return result + ffs(tmp);
 }
 
-size_t _kc_strlcpy(char *dest, const char *src, size_t size)
-{
-	size_t ret = strlen(src);
-
-	if (size) {
-		size_t len = (ret >= size) ? size - 1 : ret;
-		memcpy(dest, src, len);
-		dest[len] = '\0';
-	}
-	return ret;
-}
-
 #ifndef do_div
 #if BITS_PER_LONG == 32
 uint32_t __attribute__ ((weak)) _kc__div64_32(uint64_t * n, uint32_t base)
@@ -644,6 +632,18 @@ uint32_t __attribute__ ((weak)) _kc__div64_32(uint64_t * n, uint32_t base)
 #endif /* BITS_PER_LONG == 32 */
 #endif /* do_div */
 #endif /* 2.6.0 => 2.4.6 */
+
+size_t _kc_strlcpy(char *dest, const char *src, size_t size)
+{
+	size_t ret = strlen(src);
+
+	if (size) {
+		size_t len = (ret >= size) ? size - 1 : ret;
+		memcpy(dest, src, len);
+		dest[len] = '\0';
+	}
+	return ret;
+}
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,4) )

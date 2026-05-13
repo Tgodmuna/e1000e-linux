@@ -25,18 +25,21 @@
  * Copyright (C) 2011 Richard Cochran <richardcochran@gmail.com>
  */
 
+#include <linux/time64.h>
 #include "e1000.h"
 
 /**
  * e1000e_phc_adjfreq - adjust the frequency of the hardware clock
  * @ptp: ptp clock structure
- * @delta: Desired frequency change in parts per billion
+ * @scaled_ppm: Desired frequency offset from nominal frequency in parts per million, scaled by 2^16
  *
  * Adjust the frequency of the PHC cycle counter by the indicated delta from
  * the base frequency.
  **/
-static int e1000e_phc_adjfreq(struct ptp_clock_info *ptp, s32 delta)
+static int e1000e_phc_adjfreq(struct ptp_clock_info *ptp, long scaled_ppm)
 {
+	s32 delta = (s32)scaled_ppm_to_ppb(scaled_ppm);
+
 	struct e1000_adapter *adapter = container_of(ptp, struct e1000_adapter,
 						     ptp_clock_info);
 	struct e1000_hw *hw = &adapter->hw;
@@ -105,12 +108,13 @@ static int e1000e_phc_adjtime(struct ptp_clock_info *ptp, s64 delta)
 /**
  * e1000e_phc_gettime - Reads the current time from the hardware clock
  * @ptp: ptp clock structure
- * @ts: timespec structure to hold the current time value
+ * @ts: timespec64 structure to hold the current time value
  *
  * Read the timecounter and return the correct value in ns after converting
- * it into a struct timespec.
+ * it into a struct timespec64.
  **/
-static int e1000e_phc_gettime(struct ptp_clock_info *ptp, struct timespec *ts)
+static int e1000e_phc_gettime(struct ptp_clock_info *ptp,
+                              struct timespec64 *ts)
 {
 	struct e1000_adapter *adapter = container_of(ptp, struct e1000_adapter,
 						     ptp_clock_info);
@@ -137,14 +141,14 @@ static int e1000e_phc_gettime(struct ptp_clock_info *ptp, struct timespec *ts)
  * wall timer value.
  **/
 static int e1000e_phc_settime(struct ptp_clock_info *ptp,
-			      const struct timespec *ts)
+                              const struct timespec64 *ts)
 {
 	struct e1000_adapter *adapter = container_of(ptp, struct e1000_adapter,
 						     ptp_clock_info);
 	unsigned long flags;
 	u64 ns;
 
-	ns = timespec_to_ns(ts);
+	ns = timespec64_to_ns(ts);
 
 	/* reset the timecounter */
 	spin_lock_irqsave(&adapter->systim_lock, flags);
@@ -175,12 +179,11 @@ static void e1000e_systim_overflow_work(struct work_struct *work)
 	struct e1000_adapter *adapter = container_of(work, struct e1000_adapter,
 						     systim_overflow_work.work);
 	struct e1000_hw *hw = &adapter->hw;
-	struct timespec ts;
+        struct timespec64 ts;
 
-	adapter->ptp_clock_info.gettime(&adapter->ptp_clock_info, &ts);
+        adapter->ptp_clock_info.gettime64(&adapter->ptp_clock_info, &ts);
 
-	e_dbg("SYSTIM overflow check at %ld.%09lu\n", ts.tv_sec, ts.tv_nsec);
-
+        e_dbg("SYSTIM overflow check at %lld.%09lu\n", (long long)ts.tv_sec, ts.tv_nsec);
 	schedule_delayed_work(&adapter->systim_overflow_work,
 			      E1000_SYSTIM_OVERFLOW_PERIOD);
 }
@@ -191,10 +194,10 @@ static const struct ptp_clock_info e1000e_ptp_clock_info = {
 	.n_ext_ts	= 0,
 	.n_per_out	= 0,
 	.pps		= 0,
-	.adjfreq	= e1000e_phc_adjfreq,
+	.adjfine	= e1000e_phc_adjfreq,
 	.adjtime	= e1000e_phc_adjtime,
-	.gettime	= e1000e_phc_gettime,
-	.settime	= e1000e_phc_settime,
+	.gettime64	= e1000e_phc_gettime,
+	.settime64	= e1000e_phc_settime,
 	.enable		= e1000e_phc_enable,
 };
 

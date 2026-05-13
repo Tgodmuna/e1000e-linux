@@ -34,6 +34,7 @@
 #include <linux/tcp.h>
 #include <linux/ipv6.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 #ifdef NETIF_F_TSO
 #include <net/checksum.h>
 #ifdef NETIF_F_TSO6
@@ -217,9 +218,9 @@ static void e1000e_dump(struct e1000_adapter *adapter)
 	/* Print netdevice Info */
 	if (netdev) {
 		dev_info(pci_dev_to_dev(adapter->pdev), "Net device Info\n");
-		pr_info("Device Name     state            trans_start      last_rx\n");
-		pr_info("%-15s %016lX %016lX %016lX\n", netdev->name,
-			netdev->state, netdev->trans_start, netdev->last_rx);
+		pr_info("Device Name     state\n");
+		pr_info("%-15s %016lX\n", netdev->name,
+			netdev->state);
 	}
 
 	/* Print Registers */
@@ -3667,19 +3668,19 @@ static void e1000_configure_rx(struct e1000_adapter *adapter)
 			ew32(RXDCTL(0), rxdctl | 0x3);
 		}
 #ifdef HAVE_PM_QOS_REQUEST_ACTIVE
-		pm_qos_update_request(&adapter->netdev->pm_qos_req, lat);
+		pm_qos_update_request(&adapter->pm_qos_req, lat);
 #elif defined(HAVE_PM_QOS_REQUEST_LIST)
-		pm_qos_update_request(adapter->netdev->pm_qos_req, lat);
+		pm_qos_update_request(adapter->pm_qos_req, lat);
 #else
 		pm_qos_update_requirement(PM_QOS_CPU_DMA_LATENCY,
 					  adapter->netdev->name, lat);
 #endif
 	} else {
 #ifdef HAVE_PM_QOS_REQUEST_ACTIVE
-		pm_qos_update_request(&adapter->netdev->pm_qos_req,
+		pm_qos_update_request(&adapter->pm_qos_req,
 				      PM_QOS_DEFAULT_VALUE);
 #elif defined(HAVE_PM_QOS_REQUEST_LIST)
-		pm_qos_update_request(adapter->netdev->pm_qos_req,
+		pm_qos_update_request(adapter->pm_qos_req,
 				      PM_QOS_DEFAULT_VALUE);
 #else
 		pm_qos_update_requirement(PM_QOS_CPU_DMA_LATENCY,
@@ -4606,17 +4607,12 @@ void e1000e_reinit_locked(struct e1000_adapter *adapter)
  * e1000e_cyclecounter_read - read raw cycle counter (used by time counter)
  * @cc: cyclecounter structure
  **/
-static cycle_t e1000e_cyclecounter_read(const struct cyclecounter *cc)
+static u64 e1000e_cyclecounter_read(struct cyclecounter *cc)
 {
 	struct e1000_adapter *adapter = container_of(cc, struct e1000_adapter,
-						     cc);
+				     cc);
 	struct e1000_hw *hw = &adapter->hw;
-	cycle_t systim, systim_next;
-
-	/* latch SYSTIMH on read of SYSTIML */
-	systim = (cycle_t)er32(SYSTIML);
-	systim |= (cycle_t)er32(SYSTIMH) << 32;
-
+	u64 systim, systim_next;
 	if ((hw->mac.type == e1000_82574) || (hw->mac.type == e1000_82583)) {
 		u64 incvalue, time_delta, rem, temp;
 		int i;
@@ -4628,8 +4624,8 @@ static cycle_t e1000e_cyclecounter_read(const struct cyclecounter *cc)
 		incvalue = er32(TIMINCA) & E1000_TIMINCA_INCVALUE_MASK;
 		for (i = 0; i < E1000_MAX_82574_SYSTIM_REREADS; i++) {
 			/* latch SYSTIMH on read of SYSTIML */
-			systim_next = (cycle_t)er32(SYSTIML);
-			systim_next |= (cycle_t)er32(SYSTIMH) << 32;
+			systim_next = (u64)er32(SYSTIML);
+			systim_next |= (u64)er32(SYSTIMH) << 32;
 
 			time_delta = systim_next - systim;
 			temp = time_delta;
@@ -4877,11 +4873,10 @@ static int e1000_open(struct net_device *netdev)
 #endif
 	/* DMA latency requirement to workaround jumbo issue */
 #ifdef HAVE_PM_QOS_REQUEST_ACTIVE
-	pm_qos_add_request(&adapter->netdev->pm_qos_req, PM_QOS_CPU_DMA_LATENCY,
+	pm_qos_add_request(&adapter->pm_qos_req, PM_QOS_CPU_DMA_LATENCY,
 			   PM_QOS_DEFAULT_VALUE);
 #elif defined(HAVE_PM_QOS_REQUEST_LIST)
-	adapter->netdev->pm_qos_req = pm_qos_add_request(PM_QOS_CPU_DMA_LATENCY,
-							 PM_QOS_DEFAULT_VALUE);
+	adapter->pm_qos_req = pm_qos_add_request(PM_QOS_CPU_DMA_LATENCY,
 #else
 	pm_qos_add_requirement(PM_QOS_CPU_DMA_LATENCY, adapter->netdev->name,
 			       PM_QOS_DEFAULT_VALUE);
@@ -5014,10 +5009,10 @@ static int e1000_close(struct net_device *netdev)
 		e1000e_release_hw_control(adapter);
 
 #ifdef HAVE_PM_QOS_REQUEST_ACTIVE
-	pm_qos_remove_request(&adapter->netdev->pm_qos_req);
+	pm_qos_remove_request(&adapter->pm_qos_req);
 #elif defined(HAVE_PM_QOS_REQUEST_LIST)
-	pm_qos_remove_request(adapter->netdev->pm_qos_req);
-	adapter->netdev->pm_qos_req = NULL;
+	pm_qos_remove_request(adapter->pm_qos_req);
+	adapter->pm_qos_req = NULL;
 #else
 	pm_qos_remove_requirement(PM_QOS_CPU_DMA_LATENCY,
 				  adapter->netdev->name);
@@ -5099,9 +5094,9 @@ static void e1000e_update_phy_task(struct work_struct *work)
  * Need to wait a few seconds after link up to get diagnostic information from
  * the phy
  **/
-static void e1000_update_phy_info(unsigned long data)
+static void e1000_update_phy_info(struct timer_list *t)
 {
-	struct e1000_adapter *adapter = (struct e1000_adapter *)data;
+	struct e1000_adapter *adapter = from_timer(adapter, t, phy_info_timer);
 
 	if (test_bit(__E1000_DOWN, &adapter->state))
 		return;
@@ -5484,9 +5479,9 @@ static void e1000e_check_82574_phy_workaround(struct e1000_adapter *adapter)
  * e1000_watchdog - Timer Call-back
  * @data: pointer to adapter cast into an unsigned long
  **/
-static void e1000_watchdog(unsigned long data)
+static void e1000_watchdog(struct timer_list *t)
 {
-	struct e1000_adapter *adapter = (struct e1000_adapter *)data;
+	struct e1000_adapter *adapter = from_timer(adapter, t, watchdog_timer);
 
 	/* Do the rest outside of interrupt context */
 	schedule_work(&adapter->watchdog_task);
@@ -5949,7 +5944,7 @@ static int e1000_tx_map(struct e1000_ring *tx_ring, struct sk_buff *skb,
 	}
 
 	for (f = 0; f < nr_frags; f++) {
-		const struct skb_frag_struct *frag;
+		const skb_frag_t *frag;
 
 		frag = &skb_shinfo(skb)->frags[f];
 		len = skb_frag_size(frag);
@@ -6323,7 +6318,9 @@ static netdev_tx_t e1000_xmit_frame(struct sk_buff *skb,
 		tx_ring->buffer_info[first].time_stamp = 0;
 		tx_ring->next_to_use = first;
 	}
+#ifdef HAVE_TRANS_START
 	netdev->trans_start = jiffies;
+#endif
 
 	return NETDEV_TX_OK;
 }
@@ -6332,7 +6329,8 @@ static netdev_tx_t e1000_xmit_frame(struct sk_buff *skb,
  * e1000_tx_timeout - Respond to a Tx Hang
  * @netdev: network interface device structure
  **/
-static void e1000_tx_timeout(struct net_device *netdev)
+static void e1000_tx_timeout(struct net_device *netdev,
+                               unsigned int txqueue)
 {
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 	struct e1000_hw *hw = &adapter->hw;
@@ -6368,8 +6366,13 @@ static void e1000_reset_task(struct work_struct *work)
  *
  * Returns the address of the device statistics structure.
  **/
+#ifdef HAVE_NDO_GET_STATS64_VOID
+void e1000e_get_stats64(struct net_device *netdev,
+			struct rtnl_link_stats64 *stats)
+#else
 struct rtnl_link_stats64 *e1000e_get_stats64(struct net_device *netdev,
 					     struct rtnl_link_stats64 *stats)
+#endif
 {
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 
@@ -6406,7 +6409,9 @@ struct rtnl_link_stats64 *e1000e_get_stats64(struct net_device *netdev,
 	/* Tx Dropped needs to be maintained elsewhere */
 
 	spin_unlock(&adapter->stats64_lock);
+#ifndef HAVE_NDO_GET_STATS64_VOID
 	return stats;
+#endif
 }
 #else /* HAVE_NDO_GET_STATS64 */
 /**
@@ -7669,7 +7674,7 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	e1000e_set_ethtool_ops(netdev);
 	netdev->watchdog_timeo = 5 * HZ;
 #ifdef CONFIG_E1000E_NAPI
-	netif_napi_add(netdev, &adapter->napi, e1000e_poll, 64);
+	netif_napi_add(netdev, &adapter->napi, e1000e_poll);
 #endif
 	strlcpy(netdev->name, pci_name(pdev), sizeof(netdev->name));
 
@@ -7811,9 +7816,11 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		dev_err(pci_dev_to_dev(pdev),
 			"NVM Read Error while reading MAC address\n");
 
-	memcpy(netdev->dev_addr, adapter->hw.mac.addr, netdev->addr_len);
+	memcpy(netdev->dev_addr, (unsigned char *)adapter->hw.mac.addr,
+		   netdev->addr_len);
 #ifdef ETHTOOL_GPERMADDR
-	memcpy(netdev->perm_addr, adapter->hw.mac.addr, netdev->addr_len);
+	memcpy(netdev->perm_addr, (unsigned char *)adapter->hw.mac.addr,
+		   netdev->addr_len);
 #endif
 
 	if (!is_valid_ether_addr(netdev->dev_addr)) {
@@ -7826,13 +7833,9 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto err_eeprom;
 	}
 
-	init_timer(&adapter->watchdog_timer);
-	adapter->watchdog_timer.function = e1000_watchdog;
-	adapter->watchdog_timer.data = (unsigned long)adapter;
+	timer_setup(&adapter->watchdog_timer, e1000_watchdog, 0);
 
-	init_timer(&adapter->phy_info_timer);
-	adapter->phy_info_timer.function = e1000_update_phy_info;
-	adapter->phy_info_timer.data = (unsigned long)adapter;
+	timer_setup(&adapter->phy_info_timer, e1000_update_phy_info, 0);
 
 	INIT_WORK(&adapter->reset_task, e1000_reset_task);
 	INIT_WORK(&adapter->watchdog_task, e1000_watchdog_task);
@@ -8147,8 +8150,10 @@ static const struct dev_pm_ops e1000_pm_ops = {
 	.thaw		= e1000e_pm_thaw,
 	.poweroff	= e1000e_pm_suspend,
 	.restore	= e1000e_pm_resume,
+#ifdef CONFIG_PM_RUNTIME
 	SET_RUNTIME_PM_OPS(e1000e_pm_runtime_suspend, e1000e_pm_runtime_resume,
 			   e1000e_pm_runtime_idle)
+#endif
 };
 #endif /* USE_LEGACY_PM_SUPPORT */
 #endif

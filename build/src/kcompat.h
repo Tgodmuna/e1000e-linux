@@ -28,6 +28,32 @@
 #else
 #define KERNEL_VERSION(a,b,c) (((a) << 16) + ((b) << 8) + (c))
 #endif
+
+/* Compatibility macros - must be defined before kernel headers */
+#define from_timer(var, callback_timer, timer_fieldname) \
+	timer_container_of(var, callback_timer, timer_fieldname)
+
+#define del_timer_sync(timer) timer_delete_sync(timer)
+
+#define pm_qos_add_request(request, qos_class, value) \
+	cpu_latency_qos_add_request((request), (value))
+
+#define pm_qos_update_request(request, value) \
+	cpu_latency_qos_update_request((request), (value))
+
+#define pm_qos_remove_request(request) \
+	cpu_latency_qos_remove_request((request))
+
+extern size_t _kc_strlcpy(char *dest, const char *src, size_t size);
+#define strlcpy _kc_strlcpy
+
+#define vlan_tx_tag_present(_skb) 0
+#define vlan_tx_tag_get(_skb) 0
+
+#define pci_enable_pcie_error_reporting(dev) 0
+#define pci_disable_pcie_error_reporting(dev) do {} while (0)
+#define pci_cleanup_aer_uncorrect_error_status(dev) do {} while (0)
+
 #include <linux/init.h>
 #include <linux/types.h>
 #include <linux/errno.h>
@@ -47,6 +73,7 @@
 #include <linux/mii.h>
 #include <linux/vmalloc.h>
 #include <asm/io.h>
+#include <linux/string.h>
 #include <linux/ethtool.h>
 #include <linux/if_vlan.h>
 
@@ -243,7 +270,9 @@ struct msix_entry {
 #endif
 
 #ifndef num_online_cpus
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,18) )
 #define num_online_cpus() smp_num_cpus
+#endif
 #endif
 
 #ifndef cpu_online
@@ -328,8 +357,6 @@ struct _kc_vlan_hdr {
 	__be16 h_vlan_encapsulated_proto;
 };
 #define vlan_hdr _kc_vlan_hdr
-#define vlan_tx_tag_present(_skb) 0
-#define vlan_tx_tag_get(_skb) 0
 #endif /* NETIF_F_HW_VLAN_TX && NETIF_F_HW_VLAN_CTAG_TX */
 
 #ifndef VLAN_PRIO_SHIFT
@@ -1374,11 +1401,6 @@ static inline const char *_kc_netdev_name(const struct net_device *dev)
 #define netdev_name(netdev)	_kc_netdev_name(netdev)
 #endif /* netdev_name */
 
-#ifndef strlcpy
-#define strlcpy _kc_strlcpy
-extern size_t _kc_strlcpy(char *dest, const char *src, size_t size);
-#endif /* strlcpy */
-
 #ifndef do_div
 #if BITS_PER_LONG == 64
 # define do_div(n,base) ({					\
@@ -2019,14 +2041,6 @@ extern void _kc_pci_restore_state(struct pci_dev *);
 extern void _kc_free_netdev(struct net_device *);
 #define free_netdev(netdev) _kc_free_netdev(netdev)
 #endif
-static inline int pci_enable_pcie_error_reporting(struct pci_dev *dev)
-{
-	return 0;
-}
-
-#define pci_disable_pcie_error_reporting(dev) do {} while (0)
-#define pci_cleanup_aer_uncorrect_error_status(dev) do {} while (0)
-
 extern void *_kc_kmemdup(const void *src, size_t len, unsigned gfp);
 #define kmemdup(src, len, gfp) _kc_kmemdup(src, len, gfp)
 #ifndef bool
@@ -2462,7 +2476,7 @@ static inline int _kc_strict_strtol(const char *buf, unsigned int base,
 extern void _kc_pci_disable_link_state(struct pci_dev *dev, int state);
 #define pci_disable_link_state(p, s) _kc_pci_disable_link_state(p, s)
 #else /* < 2.6.26 */
-#include <linux/pci-aspm.h>
+#include <linux/pci.h>
 #define HAVE_NETDEV_VLAN_FEATURES
 #ifndef PCI_EXP_LNKCAP_ASPMS
 #define PCI_EXP_LNKCAP_ASPMS 0x00000c00	/* ASPM Support */
@@ -3216,8 +3230,17 @@ do {								\
 
 #define HAVE_PM_QOS_REQUEST_ACTIVE
 #define HAVE_8021P_SUPPORT
+#if ( LINUX_VERSION_CODE >= KERNEL_VERSION(4,2,0) )
+#define HAVE_NDO_GET_STATS64_VOID
+#else
 #define HAVE_NDO_GET_STATS64
+#endif
 #endif /* < 2.6.36 */
+
+/*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(4,7,0) )
+#define HAVE_TRANS_START
+#endif
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,37) )
@@ -3656,6 +3679,9 @@ extern void _kc_skb_add_rx_frag(struct sk_buff *, int, struct page *,
 #if !defined(NO_PTP_SUPPORT) && IS_ENABLED(CONFIG_PTP_1588_CLOCK)
 #define HAVE_PTP_1588_CLOCK
 #endif /* !NO_PTP_SUPPORT && IS_ENABLED(CONFIG_PTP_1588_CLOCK) */
+#if defined(HAVE_PTP_1588_CLOCK) && !defined(HAVE_HW_TIME_STAMP)
+#define HAVE_HW_TIME_STAMP
+#endif
 #endif /* >= 3.0.0 || RHEL_RELEASE > 6.4 */
 
 /*****************************************************************************/

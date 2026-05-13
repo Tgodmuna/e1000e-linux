@@ -1,0 +1,1 @@
+savedcmd_e1000e.ko := ld -r -m elf_x86_64 -z noexecstack --no-warn-rwx-segments --build-id=sha1  -T /usr/src/linux-headers-6.17.0-23-generic/scripts/module.lds -o e1000e.ko e1000e.o e1000e.mod.o .module-common.o

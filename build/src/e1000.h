@@ -29,6 +29,7 @@
 #include <linux/types.h>
 #include <linux/netdevice.h>
 #include <linux/pci.h>
+#include <linux/timer.h>
 #include <linux/if_vlan.h>
 #include "kcompat.h"
 #ifdef HAVE_HW_TIME_STAMP
@@ -322,6 +323,7 @@ struct e1000_adapter {
 	/* OS defined structs */
 	struct net_device *netdev;
 	struct pci_dev *pdev;
+	struct pm_qos_request pm_qos_req;
 #ifndef HAVE_NETDEV_STATS_IN_NETDEV
 	struct net_device_stats net_stats;
 #endif
@@ -548,9 +550,12 @@ extern void e1000e_free_rx_resources(struct e1000_ring *ring);
 extern void e1000e_free_tx_resources(struct e1000_ring *ring);
 #ifdef HAVE_NDO_GET_STATS64
 extern struct rtnl_link_stats64 *e1000e_get_stats64(struct net_device *netdev,
-						    struct rtnl_link_stats64
-						    *stats);
-#else /* HAVE_NDO_GET_STATS64 */
+                                                    struct rtnl_link_stats64 *stats);
+#elif defined(HAVE_NDO_GET_STATS64_VOID)
+extern void e1000e_get_stats64(struct net_device *netdev,
+                               struct rtnl_link_stats64 *stats);
+extern void e1000e_update_stats(struct e1000_adapter *adapter);
+#else
 extern void e1000e_update_stats(struct e1000_adapter *adapter);
 #endif /* HAVE_NDO_GET_STATS64 */
 extern void e1000e_set_interrupt_capability(struct e1000_adapter *adapter);

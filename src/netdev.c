@@ -34,6 +34,7 @@
 #include <linux/tcp.h>
 #include <linux/ipv6.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 #ifdef NETIF_F_TSO
 #include <net/checksum.h>
 #ifdef NETIF_F_TSO6
@@ -217,9 +218,9 @@ static void e1000e_dump(struct e1000_adapter *adapter)
 	/* Print netdevice Info */
 	if (netdev) {
 		dev_info(pci_dev_to_dev(adapter->pdev), "Net device Info\n");
-		pr_info("Device Name     state            trans_start      last_rx\n");
-		pr_info("%-15s %016lX %016lX %016lX\n", netdev->name,
-			netdev->state, netdev->trans_start, netdev->last_rx);
+		pr_info("Device Name     state\n");
+		pr_info("%-15s %016lX\n", netdev->name,
+			netdev->state);
 	}
 
 	/* Print Registers */
@@ -3667,19 +3668,19 @@ static void e1000_configure_rx(struct e1000_adapter *adapter)
 			ew32(RXDCTL(0), rxdctl | 0x3);
 		}
 #ifdef HAVE_PM_QOS_REQUEST_ACTIVE
-		pm_qos_update_request(&adapter->netdev->pm_qos_req, lat);
+		pm_qos_update_request(&adapter->pm_qos_req, lat);
 #elif defined(HAVE_PM_QOS_REQUEST_LIST)
-		pm_qos_update_request(adapter->netdev->pm_qos_req, lat);
+		pm_qos_update_request(adapter->pm_qos_req, lat);
 #else
 		pm_qos_update_requirement(PM_QOS_CPU_DMA_LATENCY,
 					  adapter->netdev->name, lat);
 #endif
 	} else {
 #ifdef HAVE_PM_QOS_REQUEST_ACTIVE
-		pm_qos_update_request(&adapter->netdev->pm_qos_req,
+		pm_qos_update_request(&adapter->pm_qos_req,
 				      PM_QOS_DEFAULT_VALUE);
 #elif defined(HAVE_PM_QOS_REQUEST_LIST)
-		pm_qos_update_request(adapter->netdev->pm_qos_req,
+		pm_qos_update_request(adapter->pm_qos_req,
 				      PM_QOS_DEFAULT_VALUE);
 #else
 		pm_qos_update_requirement(PM_QOS_CPU_DMA_LATENCY,
@@ -4606,17 +4607,12 @@ void e1000e_reinit_locked(struct e1000_adapter *adapter)
  * e1000e_cyclecounter_read - read raw cycle counter (used by time counter)
  * @cc: cyclecounter structure
  **/
-static cycle_t e1000e_cyclecounter_read(const struct cyclecounter *cc)
+static u64 e1000e_cyclecounter_read(struct cyclecounter *cc)
 {
 	struct e1000_adapter *adapter = container_of(cc, struct e1000_adapter,
-						     cc);
+				     cc);
 	struct e1000_hw *hw = &adapter->hw;
-	cycle_t systim, systim_next;
-
-	/* latch SYSTIMH on read of SYSTIML */
-	systim = (cycle_t)er32(SYSTIML);
-	systim |= (cycle_t)er32(SYSTIMH) << 32;
-
+	u64 systim, systim_next;
 	if ((hw->mac.type == e1000_82574) || (hw->mac.type == e1000_82583)) {
 		u64 incvalue, time_delta, rem, temp;
 		int i;
@@ -4628,8 +4624,8 @@ static cycle_t e1000e_cyclecounter_read(const struct cyclecounter *cc)
 		incvalue = er32(TIMINCA) & E1000_TIMINCA_INCVALUE_MASK;
 		for (i = 0; i < E1000_MAX_82574_SYSTIM_REREADS; i++) {
 			/* latch SYSTIMH on read of SYSTIML */
-			systim_next = (cycle_t)er32(SYSTIML);
-			systim_next |= (cycle_t)er32(SYSTIMH) << 32;
+			systim_next = (u64)er32(SYSTIML);
+			systim_next |= (u64)er32(SYSTIMH) << 32;
 
 			time_delta = systim_next - systim;
 			temp = time_delta;
@@ -4877,11 +4873,10 @@ static int e1000_open(struct net_device *netdev)
 #endif
 	/* DMA latency requirement to workaround jumbo issue */
 #ifdef HAVE_PM_QOS_REQUEST_ACTIVE
-	pm_qos_add_request(&adapter->netdev->pm_qos_req, PM_QOS_CPU_DMA_LATENCY,
+	pm_qos_add_request(&adapter->pm_qos_req, PM_QOS_CPU_DMA_LATENCY,
 			   PM_QOS_DEFAULT_VALUE);
 #elif defined(HAVE_PM_QOS_REQUEST_LIST)
-	adapter->netdev->pm_qos_req = pm_qos_add_request(PM_QOS_CPU_DMA_LATENCY,
-							 PM_QOS_DEFAULT_VALUE);
+	adapter->pm_qos_req = pm_qos_add_request(PM_QOS_CPU_DMA_LATENCY,
 #else
 	pm_qos_add_requirement(PM_QOS_CPU_DMA_LATENCY, adapter->netdev->name,
 			       PM_QOS_DEFAULT_VALUE);
@@ -5014,10 +5009,10 @@ static int e1000_close(struct net_device *netdev)
 		e1000e_release_hw_control(adapter);
 
 #ifdef HAVE_PM_QOS_REQUEST_ACTIVE
-	pm_qos_remove_request(&adapter->netdev->pm_qos_req);
+	pm_qos_remove_request(&adapter->pm_qos_req);
 #elif defined(HAVE_PM_QOS_REQUEST_LIST)
-	pm_qos_remove_request(adapter->netdev->pm_qos_req);
-	adapter->netdev->pm_qos_req = NULL;
+	pm_qos_remove_request(adapter->pm_qos_req);
+	adapter->pm_qos_req = NULL;
 #else
 	pm_qos_remove_requirement(PM_QOS_CPU_DMA_LATENCY,
 				  adapter->netdev->name);
@@ -5949,7 +5944,7 @@ static int e1000_tx_map(struct e1000_ring *tx_ring, struct sk_buff *skb,
 	}
 
 	for (f = 0; f < nr_frags; f++) {
-		const struct skb_frag_struct *frag;
+		const skb_frag_t *frag;
 
 		frag = &skb_shinfo(skb)->frags[f];
 		len = skb_frag_size(frag);
@@ -6323,7 +6318,9 @@ static netdev_tx_t e1000_xmit_frame(struct sk_buff *skb,
 		tx_ring->buffer_info[first].time_stamp = 0;
 		tx_ring->next_to_use = first;
 	}
+#ifdef HAVE_TRANS_START
 	netdev->trans_start = jiffies;
+#endif
 
 	return NETDEV_TX_OK;
 }
@@ -6369,8 +6366,13 @@ static void e1000_reset_task(struct work_struct *work)
  *
  * Returns the address of the device statistics structure.
  **/
+#ifdef HAVE_NDO_GET_STATS64_VOID
+void e1000e_get_stats64(struct net_device *netdev,
+			struct rtnl_link_stats64 *stats)
+#else
 struct rtnl_link_stats64 *e1000e_get_stats64(struct net_device *netdev,
 					     struct rtnl_link_stats64 *stats)
+#endif
 {
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 
@@ -6407,7 +6409,9 @@ struct rtnl_link_stats64 *e1000e_get_stats64(struct net_device *netdev,
 	/* Tx Dropped needs to be maintained elsewhere */
 
 	spin_unlock(&adapter->stats64_lock);
+#ifndef HAVE_NDO_GET_STATS64_VOID
 	return stats;
+#endif
 }
 #else /* HAVE_NDO_GET_STATS64 */
 /**
@@ -7505,7 +7509,6 @@ static const struct net_device_ops e1000e_netdev_ops = {
 	.ndo_change_mtu		= e1000_change_mtu,
 	.ndo_do_ioctl		= e1000_ioctl,
 	.ndo_tx_timeout		= e1000_tx_timeout,
-	.ndo_validate_addr	= eth_validate_addr,
 
 #if defined(NETIF_F_HW_VLAN_RX) || defined(NETIF_F_HW_VLAN_CTAG_RX)
 #ifdef HAVE_VLAN_RX_REGISTER
@@ -7560,9 +7563,13 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (aspm_disable_flag)
 		e1000e_disable_aspm(pdev, aspm_disable_flag);
 
+	dev_info(&pdev->dev, "e1000_probe: before pci_enable_device_mem\n");
 	err = pci_enable_device_mem(pdev);
-	if (err)
+	if (err) {
+		dev_err(&pdev->dev, "e1000_probe: pci_enable_device_mem failed: %d\n", err);
 		return err;
+	}
+	dev_info(&pdev->dev, "e1000_probe: after pci_enable_device_mem\n");
 
 	pci_using_dac = 0;
 	err = dma_set_mask_and_coherent(pci_dev_to_dev(pdev), DMA_BIT_MASK(64));
@@ -7571,29 +7578,33 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	} else {
 		err =
 		    dma_set_mask_and_coherent(pci_dev_to_dev(pdev),
-					      DMA_BIT_MASK(32));
+		                      DMA_BIT_MASK(32));
 		if (err) {
 			dev_err(pci_dev_to_dev(pdev),
 				"No usable DMA configuration, aborting\n");
 			goto err_dma;
 		}
 	}
+	dev_info(&pdev->dev, "e1000_probe: after dma_set_mask_and_coherent\n");
 
 	err = pci_request_selected_regions_exclusive(pdev,
-					  pci_select_bars(pdev, IORESOURCE_MEM),
-					  e1000e_driver_name);
-	if (err)
+				  pci_select_bars(pdev, IORESOURCE_MEM),
+				  e1000e_driver_name);
+	if (err) {
+		dev_err(&pdev->dev, "e1000_probe: pci_request_selected_regions_exclusive failed: %d\n", err);
 		goto err_pci_reg;
-
-	/* AER (Advanced Error Reporting) hooks */
-	pci_enable_pcie_error_reporting(pdev);
+	}
+	dev_info(&pdev->dev, "e1000_probe: after pci_request_selected_regions_exclusive\n");
 
 	pci_set_master(pdev);
 
 	err = -ENOMEM;
 	netdev = alloc_etherdev(sizeof(struct e1000_adapter));
-	if (!netdev)
+	if (!netdev) {
+		dev_err(&pdev->dev, "e1000_probe: alloc_etherdev failed\n");
 		goto err_alloc_etherdev;
+	}
+	dev_info(&pdev->dev, "e1000_probe: after alloc_etherdev\n");
 
 	SET_MODULE_OWNER(netdev);
 	SET_NETDEV_DEV(netdev, pci_dev_to_dev(pdev));
@@ -7603,9 +7614,13 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	pci_set_drvdata(pdev, netdev);
 #ifdef HAVE_PCI_ERS
 	/* PCI config space info */
+	dev_info(&pdev->dev, "e1000_probe: before pci_save_state\n");
 	err = pci_save_state(pdev);
-	if (err)
+	if (err) {
+		dev_err(&pdev->dev, "e1000_probe: pci_save_state failed: %d\n", err);
 		goto err_ioremap;
+	}
+	dev_info(&pdev->dev, "e1000_probe: after pci_save_state\n");
 #endif /* HAVE_PCI_ERS */
 	adapter = netdev_priv(netdev);
 	hw = &adapter->hw;
@@ -7634,10 +7649,13 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		flash_start = pci_resource_start(pdev, 1);
 		flash_len = pci_resource_len(pdev, 1);
 		adapter->hw.flash_address = ioremap(flash_start, flash_len);
-		if (!adapter->hw.flash_address)
+		if (!adapter->hw.flash_address) {
+			dev_err(&pdev->dev, "e1000_probe: ioremap flash failed\n");
 			goto err_flashmap;
+		}
 	}
 
+	dev_info(&pdev->dev, "e1000_probe: after ioremap(s)\n");
 	/* Set default EEE advertisement */
 	if (adapter->flags2 & FLAG2_HAS_EEE)
 		adapter->eee_advert = MDIO_EEE_100TX | MDIO_EEE_1000T;
@@ -7672,7 +7690,7 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 #ifdef CONFIG_E1000E_NAPI
 	netif_napi_add(netdev, &adapter->napi, e1000e_poll);
 #endif
-	strlcpy(netdev->name, pci_name(pdev), sizeof(netdev->name));
+	/* strlcpy(netdev->name, pci_name(pdev), sizeof(netdev->name)); */
 
 	netdev->mem_start = mmio_start;
 	netdev->mem_end = mmio_start + mmio_len;
@@ -7687,17 +7705,25 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 			 adapter->node);
 
 	/* setup adapter struct */
+	dev_info(&pdev->dev, "e1000_probe: before e1000_sw_init\n");
 	err = e1000_sw_init(adapter);
-	if (err)
+	if (err) {
+		dev_err(&pdev->dev, "e1000_probe: e1000_sw_init failed: %d\n", err);
 		goto err_sw_init;
+	}
+	dev_info(&pdev->dev, "e1000_probe: after e1000_sw_init\n");
 
 	memcpy(&hw->mac.ops, ei->mac_ops, sizeof(hw->mac.ops));
 	memcpy(&hw->nvm.ops, ei->nvm_ops, sizeof(hw->nvm.ops));
 	memcpy(&hw->phy.ops, ei->phy_ops, sizeof(hw->phy.ops));
 
+	dev_info(&pdev->dev, "e1000_probe: before get_variants\n");
 	err = ei->get_variants(adapter);
-	if (err)
+	if (err) {
+		dev_err(&pdev->dev, "e1000_probe: get_variants failed: %d\n", err);
 		goto err_hw_init;
+	}
+	dev_info(&pdev->dev, "e1000_probe: after get_variants\n");
 
 	hw->mac.ops.get_bus_info(&adapter->hw);
 
@@ -7795,6 +7821,7 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	 * attempt. Let's give it a few tries
 	 */
 	for (i = 0;; i++) {
+		dev_info(&pdev->dev, "e1000_probe: e1000_validate_nvm_checksum attempt %d\n", i);
 		if (e1000_validate_nvm_checksum(&adapter->hw) >= 0)
 			break;
 		if (i == 2) {
@@ -7828,6 +7855,7 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		err = -EIO;
 		goto err_eeprom;
 	}
+	dev_info(&pdev->dev, "e1000_probe: valid MAC address\n");
 
 	timer_setup(&adapter->watchdog_timer, e1000_watchdog, 0);
 
@@ -7921,8 +7949,11 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	strlcpy(netdev->name, "eth%d", sizeof(netdev->name));
 	err = register_netdev(netdev);
-	if (err)
+	if (err) {
+		dev_err(&pdev->dev, "e1000_probe: register_netdev failed: %d\n", err);
 		goto err_register;
+	}
+	dev_info(&pdev->dev, "e1000_probe: after register_netdev\n");
 
 	/* carrier off reporting is important to ethtool even BEFORE open */
 	netif_carrier_off(netdev);

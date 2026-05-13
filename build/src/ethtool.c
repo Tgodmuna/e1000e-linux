@@ -32,6 +32,10 @@
 #include <linux/vmalloc.h>
 
 #include "e1000.h"
+#ifndef strlcpy
+#define strlcpy _kc_strlcpy
+extern size_t _kc_strlcpy(char *dest, const char *src, size_t size);
+#endif
 #ifndef HAVE_NETDEV_VLAN_FEATURES
 #include <linux/if_vlan.h>
 #endif
@@ -2011,7 +2015,7 @@ static void e1000_diag_test(struct net_device *netdev,
 
 		clear_bit(__E1000_TESTING, &adapter->state);
 		if (if_running)
-			dev_open(netdev);
+			dev_open(netdev, NULL);
 	} else {
 		/* Online tests */
 
@@ -2519,7 +2523,7 @@ static int e1000e_set_eee(struct net_device *netdev, struct ethtool_eee *edata)
 
 #ifdef ETHTOOL_GET_TS_INFO
 static int e1000e_get_ts_info(struct net_device *netdev,
-			      struct ethtool_ts_info *info)
+			      struct kernel_ethtool_ts_info *info)
 {
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 
@@ -2560,8 +2564,6 @@ static int e1000e_get_ts_info(struct net_device *netdev,
 #endif /* ETHTOOL_GET_TS_INFO */
 
 static const struct ethtool_ops e1000_ethtool_ops = {
-	.get_settings		= e1000_get_settings,
-	.set_settings		= e1000_set_settings,
 	.get_drvinfo		= e1000_get_drvinfo,
 	.get_regs_len		= e1000_get_regs_len,
 	.get_regs		= e1000_get_regs,
@@ -2574,8 +2576,6 @@ static const struct ethtool_ops e1000_ethtool_ops = {
 	.get_eeprom_len		= e1000_get_eeprom_len,
 	.get_eeprom		= e1000_get_eeprom,
 	.set_eeprom		= e1000_set_eeprom,
-	.get_ringparam		= e1000_get_ringparam,
-	.set_ringparam		= e1000_set_ringparam,
 	.get_pauseparam		= e1000_get_pauseparam,
 	.set_pauseparam		= e1000_set_pauseparam,
 #ifndef HAVE_NDO_SET_FEATURES
@@ -2615,40 +2615,16 @@ static const struct ethtool_ops e1000_ethtool_ops = {
 #ifdef HAVE_ETHTOOL_GET_PERM_ADDR
 	.get_perm_addr		= ethtool_op_get_perm_addr,
 #endif
-	.get_coalesce		= e1000_get_coalesce,
-	.set_coalesce		= e1000_set_coalesce,
 #ifdef ETHTOOL_GRXRINGS
 	.get_rxnfc		= e1000_get_rxnfc,
 #endif
 #ifndef HAVE_RHEL6_ETHTOOL_OPS_EXT_STRUCT
-#ifdef ETHTOOL_GET_TS_INFO
-	.get_ts_info		= e1000e_get_ts_info,
-#endif
-#ifdef ETHTOOL_GEEE
-	.get_eee		= e1000e_get_eee,
-#endif
-#ifdef ETHTOOL_SEEE
-	.set_eee		= e1000e_set_eee,
-#endif
 #endif /* !HAVE_RHEL6_ETHTOOL_OPS_EXT_STRUCT */
 };
 
-#ifdef HAVE_RHEL6_ETHTOOL_OPS_EXT_STRUCT
-static const struct ethtool_ops_ext e1000e_ethtool_ops_ext = {
-	.size = sizeof(struct ethtool_ops_ext),
-	.set_phys_id = e1000_set_phys_id,
-	.get_ts_info = e1000e_get_ts_info,
-	.get_eee = e1000e_get_eee,
-	.set_eee = e1000e_set_eee,
-};
-
-#endif /* HAVE_RHEL6_ETHTOOL_OPS_EXT_STRUCT */
 void e1000e_set_ethtool_ops(struct net_device *netdev)
 {
 	/* have to "undeclare" const on this struct to remove warnings */
 	netdev->ethtool_ops = (struct ethtool_ops *)&e1000_ethtool_ops;
-#ifdef HAVE_RHEL6_ETHTOOL_OPS_EXT_STRUCT
-	set_ethtool_ops_ext(netdev, &e1000e_ethtool_ops_ext);
-#endif /* HAVE_RHEL6_ETHTOOL_OPS_EXT_STRUCT */
 }
 #endif /* SIOCETHTOOL */
