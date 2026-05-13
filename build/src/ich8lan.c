@@ -4916,16 +4916,10 @@ static s32 e1000_get_cfg_done_ich8lan(struct e1000_hw *hw)
 			e1000e_phy_init_script_igp3(hw);
 		}
 	} else {
-		ret_val = e1000_valid_nvm_bank_detect_ich8lan(hw, &bank);
-		if (ret_val) {
-			if (ret_val == -E1000_ERR_NVM) {
-				e_dbg("EEPROM/NVM bank detect failed, continuing with bank 0\n");
-				ret_val = 0;
-			} else {
-				/* Maybe we should do a basic PHY config */
-				e_dbg("EEPROM not present\n");
-				ret_val = -E1000_ERR_CONFIG;
-			}
+		if (e1000_valid_nvm_bank_detect_ich8lan(hw, &bank)) {
+			/* Maybe we should do a basic PHY config */
+			e_dbg("EEPROM not present\n");
+			ret_val = -E1000_ERR_CONFIG;
 		}
 	}
 

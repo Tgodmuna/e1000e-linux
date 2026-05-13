@@ -5099,9 +5099,9 @@ static void e1000e_update_phy_task(struct work_struct *work)
  * Need to wait a few seconds after link up to get diagnostic information from
  * the phy
  **/
-static void e1000_update_phy_info(struct timer_list *t)
+static void e1000_update_phy_info(unsigned long data)
 {
-	struct e1000_adapter *adapter = from_timer(adapter, t, phy_info_timer);
+	struct e1000_adapter *adapter = (struct e1000_adapter *)data;
 
 	if (test_bit(__E1000_DOWN, &adapter->state))
 		return;
@@ -5484,9 +5484,9 @@ static void e1000e_check_82574_phy_workaround(struct e1000_adapter *adapter)
  * e1000_watchdog - Timer Call-back
  * @data: pointer to adapter cast into an unsigned long
  **/
-static void e1000_watchdog(struct timer_list *t)
+static void e1000_watchdog(unsigned long data)
 {
-	struct e1000_adapter *adapter = from_timer(adapter, t, watchdog_timer);
+	struct e1000_adapter *adapter = (struct e1000_adapter *)data;
 
 	/* Do the rest outside of interrupt context */
 	schedule_work(&adapter->watchdog_task);
@@ -6332,8 +6332,7 @@ static netdev_tx_t e1000_xmit_frame(struct sk_buff *skb,
  * e1000_tx_timeout - Respond to a Tx Hang
  * @netdev: network interface device structure
  **/
-static void e1000_tx_timeout(struct net_device *netdev,
-                               unsigned int txqueue)
+static void e1000_tx_timeout(struct net_device *netdev)
 {
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 	struct e1000_hw *hw = &adapter->hw;
@@ -7670,7 +7669,7 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	e1000e_set_ethtool_ops(netdev);
 	netdev->watchdog_timeo = 5 * HZ;
 #ifdef CONFIG_E1000E_NAPI
-	netif_napi_add(netdev, &adapter->napi, e1000e_poll);
+	netif_napi_add(netdev, &adapter->napi, e1000e_poll, 64);
 #endif
 	strlcpy(netdev->name, pci_name(pdev), sizeof(netdev->name));
 
@@ -7812,11 +7811,9 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		dev_err(pci_dev_to_dev(pdev),
 			"NVM Read Error while reading MAC address\n");
 
-	memcpy(netdev->dev_addr, (unsigned char *)adapter->hw.mac.addr,
-		   netdev->addr_len);
+	memcpy(netdev->dev_addr, adapter->hw.mac.addr, netdev->addr_len);
 #ifdef ETHTOOL_GPERMADDR
-	memcpy(netdev->perm_addr, (unsigned char *)adapter->hw.mac.addr,
-		   netdev->addr_len);
+	memcpy(netdev->perm_addr, adapter->hw.mac.addr, netdev->addr_len);
 #endif
 
 	if (!is_valid_ether_addr(netdev->dev_addr)) {
@@ -7829,9 +7826,13 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto err_eeprom;
 	}
 
-	timer_setup(&adapter->watchdog_timer, e1000_watchdog, 0);
+	init_timer(&adapter->watchdog_timer);
+	adapter->watchdog_timer.function = e1000_watchdog;
+	adapter->watchdog_timer.data = (unsigned long)adapter;
 
-	timer_setup(&adapter->phy_info_timer, e1000_update_phy_info, 0);
+	init_timer(&adapter->phy_info_timer);
+	adapter->phy_info_timer.function = e1000_update_phy_info;
+	adapter->phy_info_timer.data = (unsigned long)adapter;
 
 	INIT_WORK(&adapter->reset_task, e1000_reset_task);
 	INIT_WORK(&adapter->watchdog_task, e1000_watchdog_task);
@@ -8146,10 +8147,8 @@ static const struct dev_pm_ops e1000_pm_ops = {
 	.thaw		= e1000e_pm_thaw,
 	.poweroff	= e1000e_pm_suspend,
 	.restore	= e1000e_pm_resume,
-#ifdef CONFIG_PM_RUNTIME
 	SET_RUNTIME_PM_OPS(e1000e_pm_runtime_suspend, e1000e_pm_runtime_resume,
 			   e1000e_pm_runtime_idle)
-#endif
 };
 #endif /* USE_LEGACY_PM_SUPPORT */
 #endif

@@ -2462,7 +2462,7 @@ static inline int _kc_strict_strtol(const char *buf, unsigned int base,
 extern void _kc_pci_disable_link_state(struct pci_dev *dev, int state);
 #define pci_disable_link_state(p, s) _kc_pci_disable_link_state(p, s)
 #else /* < 2.6.26 */
-#include <linux/pci.h>
+#include <linux/pci-aspm.h>
 #define HAVE_NETDEV_VLAN_FEATURES
 #ifndef PCI_EXP_LNKCAP_ASPMS
 #define PCI_EXP_LNKCAP_ASPMS 0x00000c00	/* ASPM Support */

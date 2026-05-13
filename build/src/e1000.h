@@ -29,7 +29,6 @@
 #include <linux/types.h>
 #include <linux/netdevice.h>
 #include <linux/pci.h>
-#include <linux/timer.h>
 #include <linux/if_vlan.h>
 #include "kcompat.h"
 #ifdef HAVE_HW_TIME_STAMP
